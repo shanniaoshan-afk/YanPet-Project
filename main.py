@@ -2,10 +2,18 @@ import sys
 import os
 import random
 import math
-from datetime import datetime  # 新增：用于检测深夜时间
-from PyQt5.QtWidgets import QWidget, QApplication, QLabel
+from datetime import datetime
+from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QMenu, qApp  # 新增 QMenu, qApp
 from PyQt5.QtCore import Qt, QTimer, QPoint
 from PyQt5.QtGui import QPixmap, QTransform, QCursor
+
+# --- 【路径转换函数】 ---
+# 这一步是为了让打包后的 .exe 自动找到内部的图片素材
+def resource_path(relative_path):
+    """ 获取文件的绝对路径，兼容 PyInstaller 打包后的路径 """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class YuanTouPet(QWidget):
     def __init__(self):
@@ -15,27 +23,27 @@ class YuanTouPet(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True) 
         
+        # --- 【新增：允许右键菜单】 ---
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.showContextMenu)
+        
         self.label = QLabel(self)
         self.is_dragging = False
         self.direction = 1  # 1向右，-1向左
         
-        # --- 【动作素材定义】 ---
-        self.img_stand = 'shime1.png'
-        self.img_walk = ['shime2.png', 'shime3.png']
-        self.img_fall = 'shime4.png' 
-        self.img_click = 'shime34.png'
-        self.img_sit_seq = ['shime11.png', 'shime15.png', 'shime16.png', 'shime17.png']
-        self.img_swing_seq = ['shime31.png', 'shime32.png', 'shime33.png', 'shime32.png']
-        self.img_climb_seq = ['shime12.png', 'shime13.png', 'shime14.png']
-        self.img_top_climb_seq = ['shime23.png', 'shime24.png', 'shime25.png']
-        self.img_crawl_seq = ['shime18.png', 'shime20.png', 'shime21.png']
-        self.img_drag_seq = ['shime5.png', 'shime6.png', 'shime7.png', 'shime8.png', 'shime9.png', 'shime10.png']
-        
-        # 抬手张口（惊觉）序列
-        self.img_alert_seq = ['shime34.png', 'shime35.png'] 
-        
-        # 新增：深夜睡觉动作序列 (40拉被子, 41盖上, 47熟睡)
-        self.img_sleep_seq = ['shime40.png', 'shime41.png', 'shime47.png']
+        # --- 【动作素材定义 - 使用 resource_path】 ---
+        self.img_stand = resource_path('shime1.png')
+        self.img_walk = [resource_path('shime2.png'), resource_path('shime3.png')]
+        self.img_fall = resource_path('shime4.png') 
+        self.img_click = resource_path('shime34.png')
+        self.img_sit_seq = [resource_path(f'shime{i}.png') for i in [11, 15, 16, 17]]
+        self.img_swing_seq = [resource_path(f'shime{i}.png') for i in [31, 32, 33, 32]]
+        self.img_climb_seq = [resource_path(f'shime{i}.png') for i in [12, 13, 14]]
+        self.img_top_climb_seq = [resource_path(f'shime{i}.png') for i in [23, 24, 25]]
+        self.img_crawl_seq = [resource_path(f'shime{i}.png') for i in [18, 20, 21]]
+        self.img_drag_seq = [resource_path(f'shime{i}.png') for i in [5, 6, 7, 8, 9, 10]]
+        self.img_alert_seq = [resource_path('shime34.png'), resource_path('shime35.png')] 
+        self.img_sleep_seq = [resource_path(f'shime{i}.png') for i in [40, 41, 47]]
 
         self.update_image(self.img_stand)
         self._set_to_bottom()
@@ -60,6 +68,15 @@ class YuanTouPet(QWidget):
         
         self.show()
 
+    # --- 【新增：右键退出功能】 ---
+    def showContextMenu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: white; border: 1px solid gray; }")
+        exit_action = menu.addAction("退出雁桌宠")
+        action = menu.exec_(self.mapToGlobal(pos))
+        if action == exit_action:
+            qApp.quit()
+
     def _set_to_bottom(self):
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.width() // 2, screen.height() - 150)
@@ -72,7 +89,6 @@ class YuanTouPet(QWidget):
             self.resize(pixmap.width(), pixmap.height())
 
     def play_loop_animations(self):
-        """处理循环帧动画"""
         if self.state == 'dragging':
             self.drag_step = (self.drag_step + 1) % len(self.img_drag_seq)
             self.update_image(self.img_drag_seq[self.drag_step])
@@ -94,7 +110,6 @@ class YuanTouPet(QWidget):
         if self.state in ['dragging', 'fall', 'stop']: return
         screen_geo = QApplication.primaryScreen().geometry()
 
-        # 1. 墙壁/顶部逻辑
         if self.state == 'climb':
             if self.climb_step < len(self.img_climb_seq):
                 self.update_image(self.img_climb_seq[self.climb_step]); self.climb_step += 1
@@ -109,18 +124,14 @@ class YuanTouPet(QWidget):
             if self.top_climb_dist > 30 or random.random() < 0.03: self._trigger_fall()
             return
 
-        # 2. 地面状态机
         if self.state == 'stand':
             self.update_image(self.img_stand)
             self.state_cooldown = max(0, self.state_cooldown - 1)
-            
-            # --- 新增：深夜睡觉触发逻辑 ---
             now_hour = datetime.now().hour
             is_late_night = now_hour >= 23 or now_hour < 5
-            
             r = random.random()
             if self.state_cooldown <= 0:
-                if is_late_night and r < 0.3: # 深夜有更高概率进入睡眠
+                if is_late_night and r < 0.3: 
                     self.state = 'sleep'; self.sleep_step = 0; self.sleep_timer = 0
                 elif r < 0.15: self.state = 'sit'; self.sit_step = 0; self.sit_timer = 0
                 elif r < 0.30: self.state = 'swing'; self.swing_step = 0; self.action_timer = 0
@@ -145,17 +156,13 @@ class YuanTouPet(QWidget):
                 self.move(new_x, self.y())
             if random.random() < 0.1: self.state = 'stand'; self.state_cooldown = 10
 
-        # --- 新增：睡眠状态处理 ---
         elif self.state == 'sleep':
             if self.sleep_step < len(self.img_sleep_seq) - 1:
-                # 播放拉被子(40)和盖上(41)的前序动作
                 self.update_image(self.img_sleep_seq[self.sleep_step])
                 self.sleep_step += 1
             else:
-                # 保持在熟睡(47)状态
                 self.update_image(self.img_sleep_seq[-1])
                 self.sleep_timer += 1
-                # 睡眠不容易被打断，除非定时器走完或强制叫醒（如下面双击）
                 if self.sleep_timer > 50 and random.random() < 0.05:
                     self.state = 'stand'; self.state_cooldown = 20
 
@@ -180,13 +187,10 @@ class YuanTouPet(QWidget):
     def check_mouse_proximity(self):
         if self.state in ['dragging', 'fall', 'climb', 'top_climb', 'stop']:
             return
-        
         cursor_pos = QCursor.pos() 
         pet_center = self.geometry().center()
         distance = math.hypot(cursor_pos.x() - pet_center.x(), cursor_pos.y() - pet_center.y())
-
         if distance < self.detect_range:
-            # 如果正在睡觉被鼠标靠近，会惊醒并逃跑
             if self.state != 'alert_walk':
                 self.direction = 1 if cursor_pos.x() < pet_center.x() else -1
                 self.state = 'alert_walk'
@@ -242,7 +246,6 @@ class YuanTouPet(QWidget):
             self.speed_y = -22; self.physics_timer.start(30)
 
     def mouseDoubleClickEvent(self, event):
-        # 双击依然是强制动作，但可以作为叫醒角色的手段
         self.state = 'stop'; self.update_image(self.img_click)
         QTimer.singleShot(1500, lambda: setattr(self, 'state', 'stand'))
 
