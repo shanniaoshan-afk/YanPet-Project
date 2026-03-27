@@ -1,0 +1,32 @@
+name: Build Mac App
+on: [push]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install PyQt5 pyinstaller
+
+      - name: Run PyInstaller
+        run: |
+          pyinstaller --noconsole --onefile \
+          --icon="icon.icns" \
+          --name="雁桌宠" \
+          --add-data "*.png:." \
+          main.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: YanPet-Mac-App
+          path: dist/雁桌宠.app
